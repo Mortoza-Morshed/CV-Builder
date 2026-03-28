@@ -1,6 +1,10 @@
 import { useState } from 'react';
-import { UploadCloud, FileType, CheckCircle, AlertCircle } from 'lucide-react';
+import { UploadCloud, FileType, CheckCircle, AlertCircle, FileText } from 'lucide-react';
 import axios from 'axios';
+import Classic from './components/CVTemplates/Classic';
+import ModernMinimal from './components/CVTemplates/ModernMinimal';
+import BoldSidebar from './components/CVTemplates/BoldSidebar';
+import ATSSafe from './components/CVTemplates/ATSSafe';
 
 function App() {
   const [file, setFile] = useState(null);
@@ -15,6 +19,8 @@ function App() {
   const [loadingText, setLoadingText] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [generatedCvData, setGeneratedCvData] = useState(null);
+  const [activeTemplate, setActiveTemplate] = useState('ModernMinimal');
 
   const validateFile = (selectedFile, type) => {
     let allowedTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
@@ -123,6 +129,7 @@ function App() {
       const cvJson = generateRes.data.data;
       console.log('Final CV JSON (Phase 2):', cvJson);
       
+      setGeneratedCvData(cvJson);
       setSuccess(true);
     } catch (err) {
       console.error(err);
@@ -132,6 +139,80 @@ function App() {
       setLoadingText('');
     }
   };
+
+  const templates = {
+    Classic: Classic,
+    ModernMinimal: ModernMinimal,
+    BoldSidebar: BoldSidebar,
+    ATSSafe: ATSSafe,
+  };
+
+  if (success && generatedCvData) {
+    const ActiveComponent = templates[activeTemplate];
+    return (
+      <div className="min-h-screen bg-gray-100 p-8 flex flex-col">
+        <div className="max-w-[1400px] mx-auto w-full mb-6 flex justify-between items-center">
+          <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">Your AI-Tailored CV</h1>
+          <button 
+            onClick={() => { setSuccess(false); setGeneratedCvData(null); }}
+            className="px-5 py-2.5 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+          >
+            Create Another
+          </button>
+        </div>
+
+        <div className="flex flex-1 max-w-[1400px] mx-auto w-full gap-8">
+          {/* Thumbnails Sidebar */}
+          <div className="w-[280px] flex flex-col gap-6 overflow-y-auto pb-12 px-2 scrollbar-thin">
+            <h2 className="text-sm font-bold text-gray-500 uppercase tracking-widest mb-1">Select Template</h2>
+            {Object.keys(templates).map(key => {
+              const TemplateUI = templates[key];
+              const isSelected = activeTemplate === key;
+              return (
+                <div 
+                  key={key} 
+                  onClick={() => setActiveTemplate(key)}
+                  className={`relative cursor-pointer transition-all duration-200 transform hover:scale-105 ${isSelected ? 'ring-4 ring-indigo-500 ring-offset-4' : 'ring-1 ring-gray-200'} rounded-xl overflow-hidden bg-white shadow-md hover:shadow-xl`}
+                  style={{ width: '220px', height: '311px' }} /* ~27% scale of 794x1123 */
+                >
+                  <div style={{ transform: 'scale(0.277)', transformOrigin: 'top left', width: '794px', height: '1123px', pointerEvents: 'none' }}>
+                    <TemplateUI cvData={generatedCvData} />
+                  </div>
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-gray-900 via-gray-900/60 to-transparent p-4 pt-10">
+                    <p className="text-white font-semibold text-sm text-center uppercase tracking-wide">{key.replace(/([A-Z])/g, ' $1').trim()}</p>
+                  </div>
+                  {isSelected && (
+                    <div className="absolute top-2 right-2 bg-indigo-500 text-white rounded-full p-1 shadow-md">
+                      <CheckCircle className="w-5 h-5" />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Live Preview Pane */}
+          <div className="flex-1 bg-gray-300/40 border border-gray-300 rounded-xl overflow-auto shadow-inner relative max-h-[85vh]">
+            <div className="sticky top-0 h-0 w-full flex justify-end z-10 pointer-events-none">
+              <div className="p-4">
+                <button className="pointer-events-auto bg-indigo-600 hover:bg-indigo-700 transition focus:ring-4 focus:ring-indigo-300 text-white px-6 py-2.5 rounded-lg shadow-lg font-bold flex items-center gap-2">
+                  <span>Download PDF</span>
+                  <FileText className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+             
+            {/* Centering Wrapper for the fixed-size A4 CV */}
+            <div className="w-full min-w-[850px] flex justify-center py-8">
+              <div className="shadow-2xl rounded-sm transition-all duration-300 bg-white" style={{ width: '794px', minHeight: '1123px' }}>
+                <ActiveComponent cvData={generatedCvData} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12 px-4 sm:px-6 lg:px-8">
@@ -314,18 +395,6 @@ function App() {
               </div>
             )}
 
-            {success && (
-              <div className="rounded-md bg-green-50 p-4 border border-green-200">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <CheckCircle className="h-5 w-5 text-green-400" aria-hidden="true" />
-                  </div>
-                  <div className="ml-3">
-                    <h3 className="text-sm font-medium text-green-800">CV processing complete! Check console for the final CV JSON.</h3>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Submit Button */}
