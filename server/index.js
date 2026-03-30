@@ -129,7 +129,23 @@ app.post('/api/generate', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Missing required fields for generation' });
     }
 
-    const cvData = await generateAugmentedCV(resumeText, jobDescription, targetRole);
+    let cvData;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 2;
+
+    while (attempts < MAX_ATTEMPTS) {
+      try {
+        cvData = await generateAugmentedCV(resumeText, jobDescription, targetRole);
+        break; // success — exit loop
+      } catch (err) {
+        attempts++;
+        if (err.code === 'CV_INCOMPLETE' && attempts < MAX_ATTEMPTS) {
+          console.log(`[/api/generate] Incomplete CV on attempt ${attempts} — retrying...`);
+          continue;
+        }
+        throw err; // re-throw on second failure or non-retriable errors
+      }
+    }
 
     res.json({
       success: true,

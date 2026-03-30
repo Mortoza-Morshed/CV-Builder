@@ -20,6 +20,9 @@ function App() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [generatedCvData, setGeneratedCvData] = useState(null);
+  // Each template gets its own independent deep clone so edits don't bleed across
+  const [perTemplateData, setPerTemplateData] = useState({});
+  const [isEditMode, setIsEditMode] = useState(false);
   const [activeTemplate, setActiveTemplate] = useState('ModernMinimal');
 
   const validateFile = (selectedFile, type) => {
@@ -128,8 +131,16 @@ function App() {
 
       const cvJson = generateRes.data.data;
       console.log('Final CV JSON (Phase 2):', cvJson);
-      
+
       setGeneratedCvData(cvJson);
+      // Give every template its own deep clone so edits are isolated
+      setPerTemplateData({
+        Classic: structuredClone(cvJson),
+        ModernMinimal: structuredClone(cvJson),
+        BoldSidebar: structuredClone(cvJson),
+        ATSSafe: structuredClone(cvJson),
+      });
+      setIsEditMode(false);
       setSuccess(true);
     } catch (err) {
       console.error(err);
@@ -140,6 +151,50 @@ function App() {
     }
   };
 
+  // Update a field only in the active template's data copy
+  const handleUpdateField = (path, value) => {
+    setPerTemplateData(prev => {
+      const templateData = structuredClone(prev[activeTemplate]);
+      let cursor = templateData;
+      for (let i = 0; i < path.length - 1; i++) {
+        if (cursor[path[i]] === undefined) {
+          cursor[path[i]] = typeof path[i + 1] === 'number' ? [] : {};
+        }
+        cursor = cursor[path[i]];
+      }
+      cursor[path[path.length - 1]] = value;
+      return { ...prev, [activeTemplate]: templateData };
+    });
+
+    // Auto-clear AI badge for the edited field
+    if (path[0] === 'projects' || path[0] === 'achievements') {
+      handleClearAiFlag(path[0], path[1]);
+    } else if (path[0] === 'skills') {
+      const oldValue = perTemplateData[activeTemplate]?.skills?.[path[1]]?.[path[2]];
+      if (oldValue) handleClearAiFlag('skills', oldValue, path[1]);
+    }
+  };
+
+  const handleClearAiFlag = (category, indexOrValue, subCategory = null) => {
+    setPerTemplateData(prev => {
+      const templateData = structuredClone(prev[activeTemplate]);
+      if (!templateData.aiGenerated) return prev;
+
+      if (category === 'projects' || category === 'achievements') {
+        const aiList = templateData.aiGenerated[category];
+        if (Array.isArray(aiList)) {
+          templateData.aiGenerated[category] = aiList.filter(i => i !== indexOrValue);
+        }
+      } else if (category === 'skills' && subCategory) {
+        const aiList = templateData.aiGenerated.skills?.[subCategory];
+        if (Array.isArray(aiList)) {
+          templateData.aiGenerated.skills[subCategory] = aiList.filter(s => s !== indexOrValue);
+        }
+      }
+      return { ...prev, [activeTemplate]: templateData };
+    });
+  };
+
   const templates = {
     Classic: Classic,
     ModernMinimal: ModernMinimal,
@@ -147,65 +202,113 @@ function App() {
     ATSSafe: ATSSafe,
   };
 
-  if (success && generatedCvData) {
+  if (success && Object.keys(perTemplateData).length > 0) {
+    // Each template renders from its own isolated copy
+    const activeCvData = perTemplateData[activeTemplate];
     const ActiveComponent = templates[activeTemplate];
     return (
       <div className="min-h-screen bg-gray-100 p-8 flex flex-col">
+        {/* Top Header Controls */}
         <div className="max-w-[1400px] mx-auto w-full mb-6 flex justify-between items-center">
-          <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">Your AI-Tailored CV</h1>
-          <button 
-            onClick={() => { setSuccess(false); setGeneratedCvData(null); }}
+          <div className="flex items-center gap-4">
+            <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">Your AI-Tailored CV</h1>
+            {/* Edit Mode Toggle */}
+            <div className="flex bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden ml-4">
+              <button 
+                onClick={() => setIsEditMode(false)}
+                className={`px-4 py-2 text-sm font-medium transition-colors ${!isEditMode ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}
+              >
+                Preview Mode
+              </button>
+              <button 
+                onClick={() => setIsEditMode(true)}
+                className={`px-4 py-2 text-sm font-medium transition-colors border-l border-gray-200 ${isEditMode ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}
+              >
+                Edit Mode
+              </button>
+            </div>
+
+            {/* Reset this template's edits only */}
+            {isEditMode && (
+              <button
+                onClick={() => setPerTemplateData(prev => ({ ...prev, [activeTemplate]: structuredClone(generatedCvData) }))}
+                className="ml-2 px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-md text-sm font-medium hover:bg-red-100 hover:text-red-700 transition"
+                title={`Discard edits for ${activeTemplate} and restore original AI output`}
+              >
+                Reset
+              </button>
+            )}
+          </div>
+
+          <button
+            onClick={() => { setSuccess(false); setGeneratedCvData(null); setPerTemplateData({}); }}
             className="px-5 py-2.5 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
           >
             Create Another
           </button>
         </div>
 
-        <div className="flex flex-1 max-w-[1400px] mx-auto w-full gap-8">
-          {/* Thumbnails Sidebar */}
-          <div className="w-[280px] flex flex-col gap-6 overflow-y-auto pb-12 px-2 scrollbar-thin">
-            <h2 className="text-sm font-bold text-gray-500 uppercase tracking-widest mb-1">Select Template</h2>
-            {Object.keys(templates).map(key => {
-              const TemplateUI = templates[key];
-              const isSelected = activeTemplate === key;
-              return (
-                <div 
-                  key={key} 
-                  onClick={() => setActiveTemplate(key)}
-                  className={`relative cursor-pointer transition-all duration-200 transform hover:scale-105 ${isSelected ? 'ring-4 ring-indigo-500 ring-offset-4' : 'ring-1 ring-gray-200'} rounded-xl overflow-hidden bg-white shadow-md hover:shadow-xl`}
-                  style={{ width: '220px', height: '311px' }} /* ~27% scale of 794x1123 */
-                >
-                  <div style={{ transform: 'scale(0.277)', transformOrigin: 'top left', width: '794px', height: '1123px', pointerEvents: 'none' }}>
-                    <TemplateUI cvData={generatedCvData} />
-                  </div>
-                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-gray-900 via-gray-900/60 to-transparent p-4 pt-10">
-                    <p className="text-white font-semibold text-sm text-center uppercase tracking-wide">{key.replace(/([A-Z])/g, ' $1').trim()}</p>
-                  </div>
-                  {isSelected && (
-                    <div className="absolute top-2 right-2 bg-indigo-500 text-white rounded-full p-1 shadow-md">
-                      <CheckCircle className="w-5 h-5" />
+        <div className="flex flex-1 max-w-[1400px] mx-auto w-full gap-8" style={{ height: 'calc(100vh - 130px)' }}>
+          {/* Thumbnails Sidebar — fixed height with internal scroll */}
+          <div className="w-[260px] flex flex-col flex-shrink-0" style={{ height: '100%' }}>
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 flex-shrink-0 px-1">Select Template</h2>
+            <div className="flex flex-col gap-5 overflow-y-auto flex-1 pb-6 px-1 pr-2" style={{ scrollbarWidth: 'thin' }}>
+              {Object.keys(templates).map(key => {
+                const TemplateUI = templates[key];
+                const isSelected = activeTemplate === key;
+                // Each thumbnail renders from that template's own isolated data
+                const thumbData = perTemplateData[key];
+                return (
+                  <div 
+                    key={key} 
+                    onClick={() => setActiveTemplate(key)}
+                    className={`relative cursor-pointer transition-all duration-200 transform hover:scale-[1.03] flex-shrink-0 ${
+                      isSelected ? 'ring-4 ring-indigo-500 ring-offset-2' : 'ring-1 ring-gray-200'
+                    } rounded-xl overflow-hidden bg-white shadow-md hover:shadow-xl`}
+                    style={{ width: '220px', height: '311px' }}
+                  >
+                    <div style={{ transform: 'scale(0.277)', transformOrigin: 'top left', width: '794px', height: '1123px', pointerEvents: 'none' }}>
+                      <TemplateUI cvData={thumbData} isEditMode={false} onUpdate={() => {}} />
                     </div>
-                  )}
-                </div>
-              )
-            })}
+                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-gray-900 via-gray-900/60 to-transparent p-4 pt-10">
+                      <p className="text-white font-semibold text-sm text-center uppercase tracking-wide">{key.replace(/([A-Z])/g, ' $1').trim()}</p>
+                    </div>
+                    {isSelected && (
+                      <div className="absolute top-2 right-2 bg-indigo-500 text-white rounded-full p-1 shadow-md">
+                        <CheckCircle className="w-5 h-5" />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* Live Preview Pane */}
-          <div className="flex-1 bg-gray-300/40 border border-gray-300 rounded-xl overflow-auto shadow-inner relative max-h-[85vh]">
-            <div className="sticky top-0 h-0 w-full flex justify-end z-10 pointer-events-none">
-              <div className="p-4">
-                <button className="pointer-events-auto bg-indigo-600 hover:bg-indigo-700 transition focus:ring-4 focus:ring-indigo-300 text-white px-6 py-2.5 rounded-lg shadow-lg font-bold flex items-center gap-2">
-                  <span>Download PDF</span>
-                  <FileText className="w-4 h-4" />
-                </button>
-              </div>
+          <div className="flex-1 flex flex-col bg-gray-300/40 border border-gray-300 rounded-xl shadow-inner overflow-hidden" style={{ height: '100%' }}>
+            {/* Sticky toolbar inside the preview pane */}
+            <div className="flex-shrink-0 flex justify-end items-center px-4 py-3 bg-gray-200/60 border-b border-gray-300 rounded-t-xl">
+              <button className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 transition text-white px-5 py-2 rounded-lg shadow font-semibold text-sm flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                <span>Download PDF</span>
+                <FileText className="w-4 h-4" />
+              </button>
             </div>
-             
-            {/* Centering Wrapper for the fixed-size A4 CV */}
-            <div className="w-full min-w-[850px] flex justify-center py-8">
-              <div className="shadow-2xl rounded-sm transition-all duration-300 bg-white" style={{ width: '794px', minHeight: '1123px' }}>
-                <ActiveComponent cvData={generatedCvData} />
+
+            {/* Scrollable CV canvas */}
+            <div className="flex-1 overflow-y-auto overflow-x-auto">
+              {isEditMode && (
+                <div className="flex justify-center pt-3 pointer-events-none">
+                  <span className="text-xs font-bold text-gray-400 tracking-widest uppercase">Editing Active — Click Text to Modify</span>
+                </div>
+              )}
+              <div className="min-w-[850px] flex justify-center py-8">
+                <div className="shadow-2xl rounded-sm bg-white" style={{ width: '794px', minHeight: '1123px' }}>
+                  <ActiveComponent
+                    cvData={activeCvData}
+                    isEditMode={isEditMode}
+                    onUpdate={handleUpdateField}
+                  />
+                </div>
               </div>
             </div>
           </div>
